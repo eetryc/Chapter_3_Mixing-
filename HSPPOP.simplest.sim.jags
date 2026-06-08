@@ -1,0 +1,44 @@
+model{
+
+
+  mu ~ dunif(1,100000)
+
+  
+
+  sd ~ dunif(1,100000)
+
+  
+
+  
+
+  # Survival 
+
+  
+
+  surv ~ dbeta(1, 1)
+
+
+
+  # Adult numbers
+
+  
+
+  for(y in 1:years) {
+
+      Nadult[y] ~ dnorm(mu, 1/(sd^2)) T(100, 1000000)
+
+  }
+
+    
+
+  for(i in 1:nobs) {
+
+    TruePairs[i] ~ dbinom((RObase[i] * (surv^AgeDif[i])) / Nadult[year[i]], Pair_viable_count[i])
+
+  }
+
+
+
+
+
+}

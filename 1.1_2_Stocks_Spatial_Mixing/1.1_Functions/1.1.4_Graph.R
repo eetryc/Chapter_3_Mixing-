@@ -7,14 +7,14 @@
 
 ## 1.Graph the true population ===========================================####
 ### Inspect the files =====================================================####
-p$pop_list 
+samples$pop_list 
 
 samples 
 
 # check for presence of pops
-sample_ids <- samples$id
+sample_ids <- samples1$id
 
-samples <- samples %>%
+samples <- samples1 %>%
   mutate(
     mother_sampled = mother %in% sample_ids,
     father_sampled = father %in% sample_ids
@@ -22,7 +22,7 @@ samples <- samples %>%
 
 
 
-names(p$pop_list) <- 0:(length(p$pop_list)-1) 
+names(samples$pop_list) <- 0:(length(samples$pop_list)-1) 
 
 years_to_estimate <- sort(unique(samples$cohort))
 
