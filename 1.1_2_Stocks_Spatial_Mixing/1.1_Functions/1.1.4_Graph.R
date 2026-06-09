@@ -28,7 +28,7 @@ years_to_estimate <- sort(unique(samples$cohort))
 
 
 ### Population size per year  =============================================####
-true_abundance <- lapply(p$pop_list, function(df){
+true_abundance <- lapply(samples$pop_list, function(df){
   df %>% 
     filter(age >=5) %>%
     nrow()})

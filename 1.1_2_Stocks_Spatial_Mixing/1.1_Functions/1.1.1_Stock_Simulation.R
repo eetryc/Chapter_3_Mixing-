@@ -31,12 +31,12 @@ rep.age <- 5 # minimum age to reproduce
 
 max.age <- 40 # max age they'll live to 
 
-mean_offspring <- 15 # mean number of offspring per female ^
+mean_offspring <- 150 # mean number of offspring per female ^
 
 
 
 ### Simulation timing =====================================================####
-years <- 20 # number of years to sample and estimate ^
+years <- 10 # number of years to sample and estimate ^
 
 burn.in <- 100 # number of years to run the simulation before counting 
 
@@ -50,7 +50,7 @@ sampling_window <- (run.years - years + 1):run.years
 ### Mortality related constants ===========================================####
 surv_vec <- c(0.35, 0.6, 0.7, 0.75, 0.8, rep(0.9, max.age - 4))
 
-p_catch <- 0.15 # percent mortality of catch ^ 
+p_catch <- 0.10 # percent mortality of catch ^ 
 
 K <- 10000  # carrying capacity to stabilize population ^ 
 
@@ -59,10 +59,177 @@ K <- 10000  # carrying capacity to stabilize population ^
 
 ### Stock specific information ============================================####
 
-sample_rate <- 0.03 # change percent as needed
+sample_rate <- 0.05 # change percent as needed
 
 
 ## 2. Function ============================================####
+
+## Faster function? =======================================================####
+
+stock.sim_fast <- function(init.pop.size) {
+  
+  # --- 0. Pre-allocate Vectors / Initial Population ---
+  age    <- rep(4, times = init.pop.size)
+  sex    <- sample(c('1', '0'), size = init.pop.size, prob = c(init.prop.female, 1 - init.prop.female), replace = TRUE)
+  mother <- rep(NA_character_, init.pop.size)
+  father <- rep(NA_character_, init.pop.size)
+  cohort <- rep(0, times = init.pop.size)
+  number <- seq_len(init.pop.size)
+  id     <- paste(cohort, number, sex, sep = "_")
+  
+  current_pop <- data.frame(id, number, cohort, age, sex, mother, father, stringsAsFactors = FALSE)
+  
+  pop_list    <- vector("list", run.years + 1)
+  caught_list <- vector("list", run.years)
+  pop_list[[1]] <- current_pop
+  
+  max_number <- init.pop.size
+  
+  # --- Loop ---
+  for (yr in 1:run.years) {
+    
+    if (nrow(current_pop) == 0) {
+      message(paste("Population extinct at year", yr))
+      break
+    }
+    
+    # 1. Age everyone 
+    current_pop$age <- current_pop$age + 1
+    
+    # 2. Select mature individuals using fast base indexing
+    is_female_mature <- current_pop$sex == "1" & current_pop$age >= rep.age
+    is_male_mature   <- current_pop$sex == "0" & current_pop$age >= rep.age
+    
+    n_females <- sum(is_female_mature)
+    n_males   <- sum(is_male_mature)
+    
+    offspring_df <- NULL
+    
+    # 3. Generate offspring
+    if (n_females > 0 && n_males > 0) {
+      females <- current_pop[is_female_mature, ]
+      
+      # Determine mating capability and clutch sizes
+      can_mate <- rbinom(n_females, 1, 0.8)
+      num_offspring <- rep(0, n_females)
+      if (sum(can_mate) > 0) {
+        num_offspring[can_mate == 1] <- rpois(sum(can_mate), lambda = mean_offspring)
+      }
+      
+      total_offspring <- sum(num_offspring)
+      
+      if (total_offspring > 0) {
+        # Vectorized parents selection
+        mom_ids <- rep(females$id, times = num_offspring)
+        dad_ids <- sample(current_pop$id[is_male_mature], size = total_offspring, replace = TRUE)
+        sex_off <- sample(c('1', '0'), size = total_offspring, replace = TRUE, 
+                          prob = c(init.prop.female, 1 - init.prop.female))
+        
+        off_numbers <- seq_len(total_offspring) + max_number
+        max_number  <- max_number + total_offspring
+        
+        offspring_df <- data.frame(
+          id     = paste(yr, off_numbers, sex_off, sep = "_"),
+          number = off_numbers,
+          cohort = yr,
+          age    = 0,
+          sex    = sex_off,
+          mother = mom_ids,
+          father = dad_ids,
+          stringsAsFactors = FALSE
+        )
+        
+
+        total_before <- total_before <- sum(current_pop$age > 0) # Track current abundance
+        
+        alpha <- 0.95
+        
+        beta <- (alpha * 1) / K
+        
+        
+        p_larval_survival <- alpha / (1 + beta * total_offspring)
+        p_larval_survival <- pmax(0, pmin(1, p_larval_survival))
+        
+        # Sample which offspring survive their first weeks of life
+        surviving_offspring_idx <- which(rbinom(total_offspring, 1, p_larval_survival) == 1)
+        
+        if(length(surviving_offspring_idx) > 0) {
+          offspring_df <- offspring_df[surviving_offspring_idx, , drop = FALSE]
+        } else {
+          offspring_df <- NULL
+        }
+      }
+    }
+    
+    # 4. Combine populations 
+    if (!is.null(offspring_df) && nrow(offspring_df) > 0) {
+      # rbind on base data.frames is much faster here than tracking dplyr overhead
+      current_pop <- rbind(current_pop, offspring_df)
+    }
+    
+    # 5 & 6. Natural survival & removing the old
+    # Combine filtering steps to minimize data frame copying
+    surv_prob <- surv_vec[pmin(current_pop$age, length(surv_vec))]
+    survive_nat <- rbinom(nrow(current_pop), 1, surv_prob)
+    
+    alive_idx <- which(survive_nat == 1 & current_pop$age <= max.age)
+    current_pop <- current_pop[alive_idx, , drop = FALSE]
+    
+    # 7. Fishing mortality
+    if (nrow(current_pop) > 0) {
+      catch_probabilities <- ifelse(current_pop$age > 4, p_catch, 0)
+      caught <- rbinom(nrow(current_pop), 1, catch_probabilities)
+      
+      caught_idx <- which(caught == 1)
+      surv_idx   <- which(caught == 0)
+      
+      caught_list[[yr]]  <- current_pop[caught_idx, , drop = FALSE]
+      current_pop        <- current_pop[surv_idx, , drop = FALSE]
+    } else {
+      caught_list[[yr]]  <- current_pop[0, ]
+    }
+    
+    # 9. Store population for this year
+    pop_list[[yr + 1]] <- current_pop
+  }
+  
+  return(list(pop_list = pop_list, caught_list = caught_list))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 stock.sim <- function(init.pop.size){
   
@@ -290,125 +457,3 @@ stock.sim <- function(init.pop.size){
 
 
 
-## Faster function? =======================================================####
-
-stock.sim_fast <- function(init.pop.size) {
-  
-  # --- 0. Pre-allocate Vectors / Initial Population ---
-  age    <- rep(4, times = init.pop.size)
-  sex    <- sample(c('1', '0'), size = init.pop.size, prob = c(init.prop.female, 1 - init.prop.female), replace = TRUE)
-  mother <- rep(NA_character_, init.pop.size)
-  father <- rep(NA_character_, init.pop.size)
-  cohort <- rep(0, times = init.pop.size)
-  number <- seq_len(init.pop.size)
-  id     <- paste(cohort, number, sex, sep = "_")
-  
-  current_pop <- data.frame(id, number, cohort, age, sex, mother, father, stringsAsFactors = FALSE)
-  
-  pop_list    <- vector("list", run.years + 1)
-  caught_list <- vector("list", run.years)
-  pop_list[[1]] <- current_pop
-  
-  max_number <- init.pop.size
-  
-  # --- Loop ---
-  for (yr in 1:run.years) {
-    
-    if (nrow(current_pop) == 0) {
-      message(paste("Population extinct at year", yr))
-      break
-    }
-    
-    # 1. Age everyone 
-    current_pop$age <- current_pop$age + 1
-    
-    # 2. Select mature individuals using fast base indexing
-    is_female_mature <- current_pop$sex == "1" & current_pop$age >= rep.age
-    is_male_mature   <- current_pop$sex == "0" & current_pop$age >= rep.age
-    
-    n_females <- sum(is_female_mature)
-    n_males   <- sum(is_male_mature)
-    
-    offspring_df <- NULL
-    
-    # 3. Generate offspring
-    if (n_females > 0 && n_males > 0) {
-      females <- current_pop[is_female_mature, ]
-      
-      # Determine mating capability and clutch sizes
-      can_mate <- rbinom(n_females, 1, 0.8)
-      num_offspring <- rep(0, n_females)
-      if (sum(can_mate) > 0) {
-        num_offspring[can_mate == 1] <- rpois(sum(can_mate), lambda = mean_offspring)
-      }
-      
-      total_offspring <- sum(num_offspring)
-      
-      if (total_offspring > 0) {
-        # Vectorized parents selection
-        mom_ids <- rep(females$id, times = num_offspring)
-        dad_ids <- sample(current_pop$id[is_male_mature], size = total_offspring, replace = TRUE)
-        sex_off <- sample(c('1', '0'), size = total_offspring, replace = TRUE, 
-                          prob = c(init.prop.female, 1 - init.prop.female))
-        
-        off_numbers <- seq_len(total_offspring) + max_number
-        max_number  <- max_number + total_offspring
-        
-        offspring_df <- data.frame(
-          id     = paste(yr, off_numbers, sex_off, sep = "_"),
-          number = off_numbers,
-          cohort = yr,
-          age    = 0,
-          sex    = sex_off,
-          mother = mom_ids,
-          father = dad_ids,
-          stringsAsFactors = FALSE
-        )
-        
-        # --- Fix & Apply Density Dependence to Offspring ---
-        total_before <- nrow(current_pop)
-        if (total_before + total_offspring > K) {
-          excess <- (total_before + total_offspring) - K
-          kill_n <- min(excess, total_offspring)
-          if (kill_n > 0) {
-            kill_idx     <- sample.int(total_offspring, size = kill_n, replace = FALSE)
-            offspring_df <- offspring_df[-kill_idx, , drop = FALSE]
-          }
-        }
-      }
-    }
-    
-    # 4. Combine populations 
-    if (!is.null(offspring_df) && nrow(offspring_df) > 0) {
-      # rbind on base data.frames is much faster here than tracking dplyr overhead
-      current_pop <- rbind(current_pop, offspring_df)
-    }
-    
-    # 5 & 6. Natural survival & removing the old
-    # Combine filtering steps to minimize data frame copying
-    surv_prob <- surv_vec[pmin(current_pop$age, length(surv_vec))]
-    survive_nat <- rbinom(nrow(current_pop), 1, surv_prob)
-    
-    alive_idx <- which(survive_nat == 1 & current_pop$age <= max.age)
-    current_pop <- current_pop[alive_idx, , drop = FALSE]
-    
-    # 7. Fishing mortality
-    if (nrow(current_pop) > 0) {
-      catch_probabilities <- ifelse(current_pop$age > 4, p_catch, 0)
-      caught <- rbinom(nrow(current_pop), 1, catch_probabilities)
-      
-      caught_idx <- which(caught == 1)
-      surv_idx   <- which(caught == 0)
-      
-      caught_list[[yr]]  <- current_pop[caught_idx, , drop = FALSE]
-      current_pop        <- current_pop[surv_idx, , drop = FALSE]
-    } else {
-      caught_list[[yr]]  <- current_pop[0, ]
-    }
-    
-    # 9. Store population for this year
-    pop_list[[yr + 1]] <- current_pop
-  }
-  
-  return(list(pop_list = pop_list, caught_list = caught_list))
-}

@@ -31,7 +31,7 @@ sampler <- function(harvest_df, yr, sampling_window, sample_rate) {
 
 # Define sampling rate per yearly population #
 
-sample_rate <- 0.30 # change percent as needed
+sample_rate <- 0.7 # change percent as needed
 
 
 # Apply function #

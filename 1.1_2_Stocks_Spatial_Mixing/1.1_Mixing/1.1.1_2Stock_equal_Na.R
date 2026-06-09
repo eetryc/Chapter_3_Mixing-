@@ -16,8 +16,8 @@ library(ggplot2)
 # Define vector of stock mixing proportions
   # only for stock one as stock 2 will be 1-n
 
-samp.props <- c(seq(from= 0.1, to = 1, by = 0.1))
-# samp.props <- c(0.9,1)
+# samp.props <- c(seq(from= 0.1, to = 1, by = 0.1))
+samp.props <- c(0.9,1)
 
 
 # Define init stock size
@@ -143,7 +143,7 @@ spatial_2stocks <- function(GMZ1.init, GMZ2.init, samp.props) {
 stock.est.2 <- spatial_2stocks(GMZ1.init, GMZ2.init,samp.props)
 
 stock.est.2.trimmed  <- stock.est.2 %>% 
-  filter(rhat <=1.05)
+  filter(rhat <=1.5)
 
 
 

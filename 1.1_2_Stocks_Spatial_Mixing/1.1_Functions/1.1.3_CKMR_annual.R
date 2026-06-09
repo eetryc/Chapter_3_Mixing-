@@ -384,15 +384,15 @@ CKMR_est <- function(samples){
       
       Pair_viable_count_per_agedif = n(),                   
       
-      TruePairs = sum(true_POP, na.rm=TRUE),
+      TruePairs = sum(TruePairs, na.rm=TRUE),
       
       .groups = "drop"
       
     ) %>%
     
-    arrange(cohort_2) %>% 
+    arrange(cohort_2) #%>% 
     
-    filter(TruePairs != 0)
+    # filter(TruePairs != 0)
   
   
   
@@ -434,7 +434,7 @@ CKMR_est <- function(samples){
   
   inits = function() {
     
-    init_Nadult <- rnorm(years, mean = 1000, sd = 700)
+    init_Nadult <- rnorm(years, mean = 2000, sd = 1000)
     
     init_Nadult <- pmax(pmin(init_Nadult, 900000), 500)
     
