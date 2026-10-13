@@ -1,62 +1,31 @@
-#==================================##
-#========= CKMR function ========####
-#==================================##
+#=========================================##
+#========= CKMR median function ========####
+#=========================================##
 
 
-library(tidyverse)
-library(plyr)
-library(dplyr)
-library(lubridate)
-
-
-
-
-## 1. Define function =====================================================####
-
-### JAGS model  ===========================================================####
+# make sure to run the cat function to redefine the JAGS file as needed
 
 cat("model{
 
-
   mu ~ dunif(1,100000)
-
-  
-
   sd ~ dunif(1,100000)
-
   
-
-  
-
   # Survival 
-
-  
-
   surv ~ dbeta(1, 1)
 
-
-
   # Adult numbers
-
-  
+  for(y in 1:years) {
+      Nadult[y] ~ dnorm(mu, 1/(sd^2)) T(100, 1000000)
+  }
+    
+  for(i in 1:nobs) {
+    TruePairs[i] ~ dbinom((RObase[i] * (surv^AgeDif[i])) / Nadult[year[i]], Pair_viable_count[i])
+  }
 
   for(y in 1:years) {
-
-      Nadult[y] ~ dnorm(mu, 1/(sd^2)) T(100, 1000000)
-
+    w_Nadult[y] <- Nadult[y] * weights[y]
   }
-
-    
-
-  for(i in 1:nobs) {
-
-    TruePairs[i] ~ dbinom((RObase[i] * (surv^AgeDif[i])) / Nadult[year[i]], Pair_viable_count[i])
-
-  }
-
-
-
-
+  weighted_Nadult <- sum(w_Nadult[1:years])
 
 }", file = "HSPPOP.simplest.sim.jags")
 
@@ -66,7 +35,18 @@ cat("model{
 
 
 
-CKMR_est <- function(samples){
+
+
+
+
+
+
+
+
+
+
+
+CKMR_est.med <- function(samples){
   
   ### POPs filter 
   
@@ -109,6 +89,7 @@ CKMR_est <- function(samples){
   POpairs %>% 
     
     dplyr::count(HSPPOP_candidate)
+  
   
   
   
@@ -195,307 +176,208 @@ CKMR_est <- function(samples){
   
   
   # join the two tables
-  
   possible_pairs <- POPonly  %>% 
-    
-    rbind(data.frame=HSPonly) %>% 
-    
+    rbind(HSPonly) %>%        # Fixed: data.frame= was removed here as well to avoid empty list coercion
     mutate(
-      
       sex_num = case_when(
-        
-        sex_1 == "U" ~ NA_real_, # unknown to na
-        
-        sex_1 == "0" ~ 1, # male is 1
-        
-        sex_1 == "1" ~ 0 # female is 0
-        
+        sex_1 == "U" ~ NA_real_, 
+        sex_1 == "0" ~ 1, 
+        sex_1 == "1" ~ 0 
       )
-      
     )
-  
-  
-  
-  possible_pairs %>% 
-    
-    dplyr::count(HSPPOP_candidate)
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   
   #### Data to define for JAGS model ####
   
-  
-  
-  
-  
   # years being estimated (years that actually have potential)
-  
   Cohort_years <- possible_pairs %>% 
-    
     group_by(cohort_2) %>% 
-    
     dplyr::summarise(
-      
       Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
-      
     ) %>% 
-    
-    filter(Pair_viable_count > 0) %>%     # keep only cohorts with >0
-    
+    filter(Pair_viable_count > 0) %>%     
     arrange(cohort_2)
   
-  
-  
   # extract years (count to give to be i in JAGS)
-  
   years <- nrow(Cohort_years)
   
-  
-  
-  
-  
   # group together by cohort year and age dif (differing probabilities)
-  
   Cohort_years_cohort_age <- possible_pairs %>%
-    
     group_by(cohort_2, AgeDif) %>%
-    
     dplyr::summarise(
-      
-      Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
-  
-  
-  
-  
+      Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE),
+      .groups = "drop" # Prevent grouping warnings
+    )
   
   # add the counts to each observation
-  
   observations <- possible_pairs %>%
-    
     left_join(Cohort_years_cohort_age, by = c("cohort_2", "AgeDif"))
   
-  
-  
-  # year index to link kinship to years (just the number to match it, not the actual year)
-  
-  year_index <- factor(observations$cohort_2, levels = Cohort_years$cohort_2)
+  # year index to link kinship to years
+  year_index_factor <- factor(observations$cohort_2, levels = Cohort_years$cohort_2)
   
   observations <- observations %>%
-    
     mutate(
-      
-      year_index = as.integer(year_index)
-      
-    )
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  # Count the ones with known sex (U = 0)
-  
-  # Count females (F = 1)
-  
-  observations <- observations %>%
-    
-    mutate(
-      
+      year_index = as.integer(year_index_factor),
       knownSex = as.numeric(!is.na(sex_num)),
-      
-      IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0))  # if sex_num encoded 0 = female
-      
+      IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0)) 
     )
-  
-  
-  
-  
-  
-  
-  
-  
   
   # Match true pairs
-  
   observations <- observations %>% 
-    
-    mutate(true_HSP = if_else(
-      
-      mother_1 == mother_2 | father_1 == father_2, 1, 0),
-      
-      true_POP = if_else(
-        
-        id_1 == mother_2 | id_1 == father_2, 1, 0),
-      
-      TruePairs = if_else(
-        
-        true_POP == 1 | true_HSP == 1, 1, 0))
-  
-  
-  
-  
-  
-  
+    mutate(
+      true_HSP = if_else(mother_1 == mother_2 | father_1 == father_2, 1, 0),
+      true_POP = if_else(id_1 == mother_2 | id_1 == father_2, 1, 0),
+      TruePairs = if_else(true_POP == 1 | true_HSP == 1, 1, 0)
+    )
   
   #### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
-  
-  
-  
   group_vars <- c("cohort_2", "knownSex", "IsFemale", "RObase", "Age_dif_exp")
   
-  
-  
-  
-  
   collapsed <- observations %>% 
-    
     drop_na(mother_1, father_1) %>% 
-    
-    group_by(year_index,across(all_of(group_vars))) %>%
-    
+    group_by(year_index, across(all_of(group_vars))) %>%
     dplyr::summarise(
-      
       Pair_viable_count_per_agedif = n(),                   
-      
-      TruePairs = sum(TruePairs, na.rm=TRUE),
-      
+      TruePairs = sum(TruePairs, na.rm = TRUE),
       .groups = "drop"
-      
     ) %>%
-    
     arrange(cohort_2) #%>% 
-    
     # filter(TruePairs != 0)
   
   
   
   
+  # Calc weight
+  target_year <- 100       # Change this to your specific year of interest
+  decay_rate  <- 2          # Controls how aggressively weights drop off further from the target year
   
+  actual_years <- Cohort_years$cohort_2
   
+  # Calculate Gaussian weights
+  raw_weights <- exp(-((actual_years - target_year)^2) / (2 * decay_rate^2))
   
-  collapsed %>% 
-    
-    group_by(year_index) %>% 
-    
-    summarise(TotalPairs = sum(TruePairs, na.rm = TRUE)) %>% 
-    
-    ggplot(aes(x = year_index, y = TotalPairs)) +
-    
-    geom_line() 
-  
-  
+  # Standardize weights so they sum to 1
+  standardized_weights <- raw_weights / sum(raw_weights)
+  # =========================================================================
   
   #### Just POP model
-  
   data = list( years = years,  # number of cohorts,
-               
                TruePairs = collapsed$TruePairs,
-               
                RObase = collapsed$RObase,
-               
                AgeDif = collapsed$Age_dif_exp,
-               
                nobs = nrow(collapsed),
-               
                Pair_viable_count = collapsed$Pair_viable_count_per_agedif,
-               
-               year=collapsed$year_index)
-  
-  
+               year = collapsed$year_index,
+               weights = standardized_weights) # <-- NEW: Pass weights to JAGS
   
   # Initial values
-  
   inits = function() {
-    
-    init_Nadult <- rnorm(years, mean = 2000, sd = 1000)
-    
-    init_Nadult <- pmax(pmin(init_Nadult, 900000), 500)
     
     list(
       
       surv = runif(1,0.01, 0.99),
       
-      Nadult = init_Nadult)
+      Nadult = runif(data$years,100, 100000))
     
-    # Nadult = pmin(pmax(rnorm(years, mean = 5000, sd = 2000), 0), 10000))
-    
+
   }
   
-  
-  
-  
-  
   # Parameters to follow
-  
-  params = c("Nadult","surv")
-  
-  
+  params = c("Nadult","surv", "weighted_Nadult") # <-- NEW: Track the weighted summary
   
   nburn <- 10000
-  
   nchains <- 3
-  
   niter <- 20000
-  
   n.cores = 3
   
-  
-  
-  
-  
-  Out_CKMR_sim1 = jagsUI::jags(data, inits, params, "HSPPOP.simplest.sim.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
-  
-  
-  
-  
-  
-  
+  Out_CKMR_sim1 = jagsUI::jags(data, inits, params, "HSPPOP.simplest.sim.jags", 
+                               n.burnin = nburn, n.chains = nchains, n.iter = niter, 
+                               parallel = T, verbose = T)
   
   #### Plot against true populations and compare
-  
   # Extract posterior summary as a data frame
-  
   nhat <- as.data.frame(Out_CKMR_sim1$summary)
   
+  # Keep both individual Nadult rows AND the new weighted summary row
+  nhat_filtered <- nhat[grep("^Nadult|^weighted_Nadult", rownames(nhat)), ]
   
-  
-  # Keep only the Nadult rows
-  nhat <- nhat[grep("^Nadult", rownames(nhat)), ]
-  
-  nhat$Actual_Year <- Cohort_years$cohort_2
+  # Assign actual years to Nadult rows, and label the weighted row
+  nhat_filtered$Actual_Year <- c(Cohort_years$cohort_2, paste0("Weighted_Focal_", target_year))
   
   # Select the useful columns
-  nhat_df <- nhat %>%
-    dplyr::select(Actual_Year, mean, `2.5%`, `50%`, `97.5%`,Rhat)
+  nhat_df <- nhat_filtered %>%
+    dplyr::select(Actual_Year, mean, `2.5%`, `50%`, `97.5%`, Rhat)
   
   return(nhat_df) 
 }
+
+
+
+
+
+
+
+
+test <- CKMR_est.med(samples1)
+test_plot <- test %>% 
+  filter(Actual_Year != "Weighted_Focal_100") %>% 
+  mutate(Actual_Year = as.numeric(Actual_Year))
+
+med <- test$mean[34]
+med_CIup <- test$`97.5%`[34]
+med_CIlow <- test$`2.5%`[34]
+
+ggplot(test_plot, aes(x = Actual_Year, y = mean)) +
+  
+  # Year-specific CI
+  geom_ribbon(
+    aes(ymin = `2.5%`, ymax = `97.5%`, fill = "95% CI"),
+    alpha = 0.5,
+    show.legend = FALSE
+  ) +
+  
+  # Median CI band
+  annotate(
+    "rect",
+    xmin = -Inf, xmax = Inf,
+    ymin = med_CIlow,
+    ymax = med_CIup,
+    alpha = 0.3,
+    fill = "lightblue"
+  ) +
+  
+  geom_line(aes(colour = "Estimate")) +
+  
+  geom_line(
+    data = true_abundance,
+    aes(x = Actual_Year, y = True_Nadult, colour = "Truth"),
+    linewidth = 1
+  ) +
+  
+  geom_hline(
+    aes(yintercept = med, colour = "Median Estimate"),
+    linetype = 2
+  ) +
+  
+  scale_colour_manual(
+    values = c(
+      Estimate = "red",
+      Truth = "black",
+      `Median Estimate` = "blue"
+    )
+  ) +
+  
+  scale_fill_manual(
+    values = c(`95% CI` = "pink")
+  ) +
+  
+  coord_cartesian(
+    ylim = c(1000, 4000),
+    xlim = c(90, 103)
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(color = NULL, x = "Year", y = "Adult abundance")
+  
   
 
