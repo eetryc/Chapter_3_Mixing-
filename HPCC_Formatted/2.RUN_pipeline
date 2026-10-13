@@ -1,0 +1,29 @@
+#!/bin/bash
+#SBATCH --job-name=ckmr_pipeline
+#SBATCH --output=ckmr_pipeline_%j.out
+#SBATCH --error=ckmr_pipeline_%j.err
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=500G
+#SBATCH --time=04:00:00
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=trycemil@msu.edu
+
+# Load any required R or compilation modules (uncomment/adjust if your cluster needs them)
+module purge
+module load R/4.3.2-foss-2023a 2>/dev/null || module load R/4.3.2
+module load JAGS/4.3.2-foss-2023a 2>/dev/null || module load JAGS 2>/dev/null || true
+# Explicitly set your user library path
+export R_LIBS_USER="/mnt/home/trycemil/R/x86_64-pc-linux-gnu-library/4.3"
+
+echo "=== Starting Population Simulation ==="
+date
+Rscript run_simulation.R
+echo "=== Simulation Finished Successfully ==="
+
+echo "=== Starting JAGS Estimation ==="
+date
+Rscript run_estimation.R
+echo "=== JAGS Estimation Finished Successfully ==="
+date
