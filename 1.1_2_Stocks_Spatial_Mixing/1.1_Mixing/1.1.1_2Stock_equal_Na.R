@@ -16,13 +16,13 @@ library(ggplot2)
 # Define vector of stock mixing proportions
   # only for stock one as stock 2 will be 1-n
 
-# samp.props <- c(seq(from= 0.1, to = 1, by = 0.1))
-samp.props <- c(0.9,1)
+samp.props <- c(seq(from= 0.1, to = 1, by = 0.1))
+samp.props <- c(0.3,1)
 
 
 # Define init stock size
 
-GMZ1.init <- 1000
+GMZ1.init <- 100000
 
 GMZ2.init <- 1000
 
@@ -80,7 +80,9 @@ spatial_2stocks <- function(GMZ1.init, GMZ2.init, samp.props) {
         slice_sample(prop = p, replace = FALSE) %>% 
         rbind(slice_sample(samples2, prop = (1 - p), replace = FALSE))
       
-      est_df <- CKMR_est(mixed_samp)
+      ckmr_output <- CKMR_est(mixed_samp)
+      
+      est_df <- ckmr_output$nhat
       
       est_df$proportion <- p 
       est_df$iteration  <- j
@@ -142,9 +144,16 @@ spatial_2stocks <- function(GMZ1.init, GMZ2.init, samp.props) {
 
 stock.est.2 <- spatial_2stocks(GMZ1.init, GMZ2.init,samp.props)
 
-stock.est.2.trimmed  <- stock.est.2 %>% 
-  filter(rhat <=1.5)
 
+## Trim for CI that are too wide
+
+stock.est.2.trimmed  <- stock.est.2 %>%
+  mutate(dev_50 = 0.5 * (avg_mean_Nadult),
+         upper=avg_mean_Nadult + dev_50,
+         lower=avg_mean_Nadult - dev_50) |> 
+  filter(avg_lower_2.5 > lower,
+         avg_upper_97.5 < upper)
+  
 
 
 
@@ -169,7 +178,7 @@ ggplot(stock.est.2.trimmed, aes(x = Actual_Year)) +
 ggplot(stock.est.2.trimmed, aes(x = Actual_Year)) +
   geom_line(aes(y = avg_mean_Nadult, group = proportion, color = as.factor(proportion)), alpha = 0.7) +
   geom_line(aes(y = True_Nadult), color = "black", size = 1.2, linetype = "solid") +
-  scale_color_viridis_d(name = "Sampling Prop (GMZ1)") +
+  scale_color_discrete(name = "Sampling Prop (GMZ1)") +
   labs(
     title = "Influence of Mixing Bias on Population Recovery Estimates",
     subtitle = "Solid black line represents True Stock 1 Abundance",
@@ -205,6 +214,28 @@ ggplot(no.mix.samp,aes(x = Actual_Year)) +
   geom_line(aes(y = avg_mean_Nadult ), colour = "red") +
   geom_ribbon(aes(ymin = avg_lower_2.5 , ymax = avg_upper_97.5), fill = "pink", alpha = 0.5) +
   geom_line(aes(y = True_Nadult), colour = "darkblue", linewidth = 1.1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
