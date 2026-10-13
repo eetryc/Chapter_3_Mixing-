@@ -21,7 +21,7 @@
   
   head(prop_grid)
 
-
+  prop_grid <- prop_grid[8,]
 
 ## Function for mixing stocks together  ===================================####
   
@@ -73,7 +73,8 @@ spatial_3stocks <- function(GMZ1.init, GMZ2.init, GMZ3.init, prop_grid) {
         rbind(slice_sample(samples2, prop = p2, replace = FALSE)) %>% 
         rbind(slice_sample(samples3, prop = p3, replace = FALSE))
       
-      est_df <- CKMR_est(mixed_samp)
+      ckmr_output <- CKMR_est.med(mixed_samp)
+      est_df      <- ckmr_output$nhat
       
       est_df$p1        <- p1 
       est_df$p2        <- p2
@@ -101,6 +102,9 @@ spatial_3stocks <- function(GMZ1.init, GMZ2.init, GMZ3.init, prop_grid) {
       .groups         = "drop"
     )
   
+  averaged_estimates <- averaged_estimates |> 
+    mutate(Actual_Year = as.integer(Actual_Year))
+  
   ### 5. Calculate true population abundance =============================####
   years_to_estimate <- sort(unique(samples1$cohort))
   
@@ -109,7 +113,9 @@ spatial_3stocks <- function(GMZ1.init, GMZ2.init, GMZ3.init, prop_grid) {
     data.frame(Actual_Year = i, True_Nadult = adults_stock1)
   }) %>% bind_rows()
   
-  true_abundance <- true_abundance %>% filter(Actual_Year %in% years_to_estimate)
+  true_abundance <- true_abundance %>% 
+    filter(Actual_Year %in% years_to_estimate) |> 
+    mutate(Actual_Year = as.integer(Actual_Year))
   
   ### 6. Combine Truth and Estimates ======================================####
   comparison_df <- averaged_estimates %>%
@@ -170,3 +176,4 @@ ggplot(stock.est.3_violin, aes(x = mix_combo, y = rel.bias, fill = as.factor(p1)
   ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+
