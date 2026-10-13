@@ -10,13 +10,14 @@
 
 
 ## 0. Load libraries, init. storage =======================================####
+
 library(tidyr)
 library(dplyr)
 library(stringr)
 library(ggplot2)
 
 # rm(pop_list, all_fish, current_pop,samples,empty_offspring) # or
-rm(list=ls())
+# rm(list=ls())
 
 
 
@@ -54,7 +55,7 @@ p_catch <- 0.10 # percent mortality of catch ^
 
 K <- 10000  # carrying capacity to stabilize population ^ 
 
-
+p_larval_survival <- 0.15
 
 
 ### Stock specific information ============================================####
@@ -75,7 +76,8 @@ stock.sim_fast <- function(init.pop.size) {
   father <- rep(NA_character_, init.pop.size)
   cohort <- rep(0, times = init.pop.size)
   number <- seq_len(init.pop.size)
-  id     <- paste(cohort, number, sex, sep = "_")
+  
+  id     <- sprintf("%d_%d_%s", cohort, number, sex)
   
   current_pop <- data.frame(id, number, cohort, age, sex, mother, father, stringsAsFactors = FALSE)
   
@@ -84,11 +86,11 @@ stock.sim_fast <- function(init.pop.size) {
   pop_list[[1]] <- current_pop
   
   max_number <- init.pop.size
-  
   # --- Loop ---
   for (yr in 1:run.years) {
     
-    if (nrow(current_pop) == 0) {
+    n_current <- nrow(current_pop)
+    if (n_current == 0) {
       message(paste("Population extinct at year", yr))
       break
     }
@@ -96,7 +98,7 @@ stock.sim_fast <- function(init.pop.size) {
     # 1. Age everyone 
     current_pop$age <- current_pop$age + 1
     
-    # 2. Select mature individuals using fast base indexing
+    # 2. Select mature individuals
     is_female_mature <- current_pop$sex == "1" & current_pop$age >= rep.age
     is_male_mature   <- current_pop$sex == "0" & current_pop$age >= rep.age
     
@@ -119,44 +121,35 @@ stock.sim_fast <- function(init.pop.size) {
       total_offspring <- sum(num_offspring)
       
       if (total_offspring > 0) {
-        # Vectorized parents selection
-        mom_ids <- rep(females$id, times = num_offspring)
-        dad_ids <- sample(current_pop$id[is_male_mature], size = total_offspring, replace = TRUE)
-        sex_off <- sample(c('1', '0'), size = total_offspring, replace = TRUE, 
-                          prob = c(init.prop.female, 1 - init.prop.female))
+        realized_larval_survival <- p_larval_survival / (1 + (n_current / K))
         
-        off_numbers <- seq_len(total_offspring) + max_number
-        max_number  <- max_number + total_offspring
+        surviving_idx <- which(rbinom(total_offspring, 1, realized_larval_survival) == 1)
+        n_survivors <- length(surviving_idx)
         
-        offspring_df <- data.frame(
-          id     = paste(yr, off_numbers, sex_off, sep = "_"),
-          number = off_numbers,
-          cohort = yr,
-          age    = 0,
-          sex    = sex_off,
-          mother = mom_ids,
-          father = dad_ids,
-          stringsAsFactors = FALSE
-        )
-        
-
-        total_before <- total_before <- sum(current_pop$age > 0) # Track current abundance
-        
-        alpha <- 0.95
-        
-        beta <- (alpha * 1) / K
-        
-        
-        p_larval_survival <- alpha / (1 + beta * total_offspring)
-        p_larval_survival <- pmax(0, pmin(1, p_larval_survival))
-        
-        # Sample which offspring survive their first weeks of life
-        surviving_offspring_idx <- which(rbinom(total_offspring, 1, p_larval_survival) == 1)
-        
-        if(length(surviving_offspring_idx) > 0) {
-          offspring_df <- offspring_df[surviving_offspring_idx, , drop = FALSE]
-        } else {
-          offspring_df <- NULL
+        if (n_survivors > 0) {
+          # Only generate IDs and records for surviving offspring
+          mom_ids_all <- rep(females$id, times = num_offspring)
+          mom_ids     <- mom_ids_all[surviving_idx]
+          
+          dad_ids_all <- sample(current_pop$id[is_male_mature], size = total_offspring, replace = TRUE)
+          dad_ids     <- dad_ids_all[surviving_idx]
+          
+          sex_off     <- sample(c('1', '0'), size = n_survivors, replace = TRUE, 
+                                prob = c(init.prop.female, 1 - init.prop.female))
+          
+          off_numbers <- seq_len(n_survivors) + max_number
+          max_number  <- max_number + n_survivors
+          
+          offspring_df <- data.frame(
+            id     = sprintf("%d_%d_%s", yr, off_numbers, sex_off),
+            number = off_numbers,
+            cohort = yr,
+            age    = 0,
+            sex    = sex_off,
+            mother = mom_ids,
+            father = dad_ids,
+            stringsAsFactors = FALSE
+          )
         }
       }
     }
@@ -444,6 +437,12 @@ stock.sim <- function(init.pop.size){
   ))
   
 }
+
+
+
+
+
+
 
 
 
